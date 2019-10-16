@@ -1,9 +1,14 @@
-class blur{
+class Blur{
+
     constructor(ctx, radius){
         this.ctx = ctx;
         this.radius = radius ? Math.abs(radius) : 1
         this.threads = 2;
+        this.uselinear = false;
         this.usemainthread = false;
+        this.stoped = false;
+        this.running = false;
+        this.debug = false;
     }
 
     setRadius(radius){
@@ -17,34 +22,66 @@ class blur{
     useMainThread(value){
         this.usemainthread = typeof value == "boolean" ? value : false;
     }
+
+    useLinear(value){
+        this.uselinear = typeof value == "boolean" ? value : false;
+    }
+
+    setDebug(value){
+        this.debug = typeof value == "boolean" ? value : false;
+    }
+
+    stop(){
+        if(this.running) this.stoped = true;
+    }
 }
 
 (function(){
-    let average = (array) => array.reduce((a, b) => a + b) / array.length;
+    // Something functions
 
+    //Get's average number for array
+    // => [5, 5, 4, 4] => 18 / 4 => 4.5
+    var average = (array) => array.reduce((a, b) => a + b) / array.length;
+
+    /**
+     * Returns the average value of a pixel over 
+     * a specified radius in specific x and y
+     * 
+     * @param {ImageData} data 
+     * @param {Number} radius 
+     * @param {Number} x 
+     * @param {Number} y 
+     */
     function getAverage(data, radius, x, y){
+        // Calc the center
         var center = Math.round(radius * 0.5),
+            // If the center goes beyond the boundaries of the image, we normalize it.
             sx = x - center > 0 ? x - center : 0,
             sy = y - center > 0 ? y - center : 0,
+            // Do the same with the width
             ex = x + center < data.width ? x + center : data.width,
             ey = y + center < data.height ? y + center : data.height,
+            // Reserve variables
             pos = null,
+            dx, dy,
             delta = [
                 [],
                 [],
                 [],
                 []
             ];
-    
-        for(var dx = sx;dx < ex;dx++)
-            for(var dy = sy;dy < ey;dy++){
+            
+        // We go to the specified points in the image and collect pixel data on a four channels
+        for(dx = sx;dx < ex;dx++)
+            for(dy = sy;dy < ey;dy++){
                 pos = 4 * (dx + dy * data.width);
                 delta[0].push(data.data[pos]);
                 delta[1].push(data.data[pos+1]);
                 delta[2].push(data.data[pos+2]);
                 delta[3].push(data.data[pos+3]);
             }
-    
+        
+        // We return the average value of four channels
         return [
             average(delta[0]),
             average(delta[1]),
@@ -53,33 +90,87 @@ class blur{
         ]
     }
 
+    /**
+     * Splits an image of height H and width
+     * W into pieces of height h and width w
+     * 
+     * @param {Number} W 
+     * @param {Number} H 
+     * @param {Number} w 
+     * @param {Number} h 
+     */
     function blocks(W, H, w, h) {
+        var chuncks = [],
+            cx = W / w | 0,
+            cy = H / h | 0,
+            x, y;
+        
+        for(x = 0; x < cx; x++){
+            chuncks[x] = [];
+            for(y = 0; y < cy; y++){
+                chuncks[x][y] = {
+                    w: w,
+                    h: h
+                }
 
-        var hor = pack([], W, H, w, h, 0, 0);
-        var ver = pack([], W, H, h, w, 0, 0);
-    
-        return (hor.length >= ver.length ? hor : ver).sort(function(a, b) {
-            return (a.y - b.y) || (a.x - b.x);
-        });
-    
-        function pack(pieces, W, H, w, h, x0, y0) {
-            var x, y;
-            var nx = W / w | 0;
-            var ny = H / h | 0;
-            var n = nx * ny;
-            for (y = 0; y < ny; y++) for (x = 0; x < nx; x++) {
-                pieces.push({ x: x0 + x*w, y: y0 + y*h, w: w, h: h });
+                if(y + 1 >= cy && (y * h < H || y * h > H)){
+                    chuncks[x][y].h += H - (y + cy - y) * h;
+                }
+                if(x + 1 >= cx && (x * w < W || x * w > W)){
+                    chuncks[x][y].w += W - (x + cx - x) * w;
+                }
             }
-            if (W % w >= h && H >= w) {
-                pack(pieces, W % w, H, h, w, x0 + nx*w, 0);
-            } else if (H % h >= w && W >= h) {
-                pack(pieces, W, H % h, h, w, 0, y0 + ny*h);
-            }
-            return pieces;
         }
-    
+
+        return {
+            stepx: w,
+            stepy: h,
+            chuncks: chuncks
+        };
     }
 
+    /**
+     * If image data has been transferred,
+     * inserts ndata into data
+     * 
+     * @param {ImageData} data 
+     * @param {ImageData} ndata 
+     * @param {Number} dx 
+     * @param {Number} dy 
+     */
+    function put(data, ndata, dx, dy){
+        var y,
+            x,
+            w = ndata.width, 
+            h = ndata.height,
+            pos,
+            mx,
+            my,
+        mpos;
+
+        for (y = 0; y < h; y++)
+            for (x = 0; x < w; x++) {
+                mx = x + dx;
+                my = y + dy;
+                pos = 4 * (y * w + x);
+                mpos = 4 * (my * data.width + mx);
+
+                data.data[mpos] = ndata.data[pos]
+                data.data[mpos+1] = ndata.data[pos+1]
+                data.data[mpos+2] = ndata.data[pos+2]
+                data.data[mpos+3] = ndata.data[pos+3]
+            }
+    }
+
+    /**
+     * Crop image
+     * 
+     * @param {ImageData} data 
+     * @param {Number} dx 
+     * @param {Number} dy 
+     * @param {Number} w 
+     * @param {Number} h 
+     */
     function cut(data, dx, dy, w, h){
         var new_data = new ImageData(w, h),
                                         y,
@@ -91,8 +182,8 @@ class blur{
                                         my,
                                     mpos;
 
-        for (var y = dy; y < lb; y++)
-            for (var x = dx; x < lr; x++) {
+        for (y = dy; y < lb; y++)
+            for (x = dx; x < lr; x++) {
                 mx = x - dx;
                 my = y - dy;
                 pos = 4 * (y * data.width + x);
@@ -107,34 +198,82 @@ class blur{
         return new_data;
     }
 
-    var blob = new Blob([`
+
+    //Worker's code
+    const blob = new Blob([`
         ${cut.toString()}
         var average = ${average.toString()}
         ${getAverage.toString()}
 
         self.onmessage = function(e) {
-            var radius = e.data.radius,
-                metrix = e.data.metrix,
-                data = cut(e.data.context, metrix.x, metrix.y, metrix.width, metrix.height),
-                pos;
+            var radius = e.data.radius, // Blur radius
+                metrix = e.data.metrix, // x, y, width, height
+                cx = metrix.x - radius > 0 ? metrix.x - radius : 0, // X offset
+                cy = metrix.y - radius > 0 ? metrix.y - radius : 0, // Y offset
+                dx = (metrix.x - cx), // real X offset
+                dy = (metrix.y - cy), // real y offset
+                cw = metrix.width + dx < e.data.context.width ? metrix.width + dx : e.data.context.width, // width with dx offset
+                ch = metrix.height + dy < e.data.context.height ? metrix.height + dy : e.data.context.height, // height with dy offset
+                pos, data, x, y; // use next
 
-            for(var x = 0;x < data.width;x++)
-                for(var y = 0;y < data.height;y++){
-                    pos = 4 * (x + y * data.width);
-                    avg = getAverage(data, radius, x, y);
-                    data.data[pos] = avg[0];
-                    data.data[pos+1] = avg[1];
-                    data.data[pos+2] = avg[2];
-                    data.data[pos+3] = avg[3];
+            //Blur borders for linear drawing
+            if(e.data.cutradius == true){
+                data = cut(e.data.context, cx, cy, cw, ch);
+
+                for(x = 0;x < data.width;x++){
+                    for(y = 0;y < data.height;y++){
+                        pos = 4 * (x + y * data.width);
+                        avg = getAverage(data, radius, x, y);
+                        data.data[pos] = avg[0];
+                        data.data[pos+1] = avg[1];
+                        data.data[pos+2] = avg[2];
+                        data.data[pos+3] = avg[3];
+                    }
+                    
+                    if(e.data.progressevents)
+                        self.postMessage({
+                            type: "progress",
+                            done: x + y,
+                            of: data.width + data.height
+                        })
                 }
+
+                data = cut(data, dx, dy, metrix.width, metrix.height);
+            //Blur region
+            }else{
+                data = cut(e.data.context, metrix.x, metrix.y, metrix.width, metrix.height)
+                
+                for(x = 0;x < data.width;x++){
+                    for(y = 0;y < data.height;y++){
+                        pos = 4 * (x + y * data.width);
+                        avg = getAverage(data, radius, x, y);
+                        data.data[pos] = avg[0];
+                        data.data[pos+1] = avg[1];
+                        data.data[pos+2] = avg[2];
+                        data.data[pos+3] = avg[3];
+                    }
+
+                    if(e.data.progressevents)
+                        self.postMessage({
+                            type: "progress",
+                            done: x + y,
+                            of: data.width + data.height
+                        })
+                }
+            }
+
+            
             
             self.postMessage({
+                type: "end",
                 d: data,
                 m: metrix
             })
         };
     `], {type: 'application/javascript'});
 
+
+    // Like a stream
     class SThread{
         constructor(){
             var _ = this;
@@ -142,11 +281,13 @@ class blur{
 
         }
 
-        start(context, radius, width, height, x, y){
+        start(context, radius, width, height, x, y, cutradius, ondata){
             var _ = this;
             _.worker.postMessage({
                 context: context,
                 radius: radius,
+                cutradius: cutradius,
+                progressevents: typeof ondata == "function",
                 metrix: {
                     width: width,
                     height: height,
@@ -157,18 +298,36 @@ class blur{
 
             return new Promise(function(res, rej){
                 _.worker.onmessage = function(e){
-                    res(e.data)
-                    _.worker.terminate()
+                    if(e.data.type == "end"){
+                        res(e.data)
+                        _.worker.terminate()
+                    }else if(e.data.type == "progress"){
+                        if(typeof ondata == "function")
+                            ondata(e.data);
+                    }
                 }
             })
         }
     }
 
-    async function decASYNC(x, y, w, h, r, imagedata, index, of){
+    /**
+     * Creates a stream and processes a piece of image asynchronously
+     * 
+     * @param {Int} x 
+     * @param {Int} y 
+     * @param {Int} w 
+     * @param {Int} h 
+     * @param {Int} r 
+     * @param {ImageData} imagedata 
+     * @param {Int} index 
+     * @param {Int} of 
+     * @param {Boolean} cutradius 
+     */
+    async function decASYNC(x, y, w, h, r, imagedata, index, of, cutradius, ondata){
         thread = new SThread();
-        
+
         return new Promise(function(res, rej){
-            thread.start(imagedata, r, w, h, x, y).then(function(data){
+            thread.start(imagedata, r, w, h, x, y, cutradius == true, ondata).then(function(data){
                 data.iterate = {
                     number: index,
                     of: of - 1
@@ -178,99 +337,206 @@ class blur{
         })
     }
 
-    blur.prototype.blurRegion = function(x, y, w, h, imagedata){
+
+    /**
+     * Blurs a piece of the image given by the borders x y and the frame w h
+     * 
+     * @param {Int} x
+     * @param {Int} y
+     * @param {Int} w
+     * @param {Int} h
+     * @param {ImageData} imagedata 
+     */
+    Blur.prototype.blurRegion = function(x, y, w, h, imagedata){
         var avg = null,
+            _ = this,
             pos,
-            data = imagedata ? cut(imagedata, x, y, w, h) : this.ctx.getImageData(x, y, w, h);
+            rt = {
+                data: function(func){
+                    rt.ondata = func;
 
-        if(window.Worker && !this.usemainthread && this.threads != 1){
-            if((this.threads % 2) != 0)
-                this.threads += 1
+                    if(!window.Worker || _.usemainthread){
+                        rt.render()
+                    }
 
-            var tc = Math.round(this.threads / 2),
+                    return rt;
+                },
+                render: function(func){
+                    rt.onrender = func;
+
+                    if(!window.Worker || _.usemainthread){
+                        rt.onrender()
+                    }
+                    return rt;
+                }
+            },
+            threads = _.threads,
+            data = imagedata ? cut(imagedata, x, y, w, h) : _.ctx.getImageData(x, y, w, h);
+
+        if(window.Worker && !_.usemainthread && threads > 1){
+            if((threads % 2) != 0)
+                threads += 1
+
+            var tc = Math.round(threads / 2),
                 bl = blocks(data.width, data.height, Math.floor(data.width / tc), Math.floor(data.height / tc));
 
-            for(var i = 0;i < bl.length;i++){
-                decASYNC(bl[i].x, bl[i].y, bl[i].w, bl[i].h, this.radius, data, i, bl.length).then(function(data){
-                    this.ctx.putImageData(data.d, data.m.x + x, data.m.y + y)
+            if(!_.uselinear){
+                _.running = true;
+                var x, y;
+                for(x = 0;x < bl.chuncks.length;x++){
+                    for(y = 0;y < bl.chuncks[x].length;y++){
+
+                        if(_.debug){
+                            _.ctx.fillStyle = "rgba(0, 155, 0, 0.4)";
+                            _.ctx.fillRect(x * bl.stepx, y * bl.stepy, bl.chuncks[x][y].w, bl.chuncks[x][y].h);
+                        }
+
+                        decASYNC(
+                            x * bl.stepx,
+                            y * bl.stepy,
+                            bl.chuncks[x][y].w,
+                            bl.chuncks[x][y].h,
+                            _.radius,
+                            data,
+                            x + y,
+                            bl.chuncks.length + bl.chuncks[y].length,
+                            false,
+                            rt.ondata
+                        ).then(function(Vdata){
+                            if(!imagedata){
+                                _.ctx.putImageData(Vdata.d, Vdata.m.x, Vdata.m.y);
+                            }else{
+                                put(data, Vdata.d, Vdata.m.x, Vdata.m.y);
+                            }
+
+                            if(typeof rt.render == "function")
+                                rt.onrender(Vdata);
+                        })
+                    }
+                }
+            }else{
+                try{
+                  _.running = true;
+                  var renderMatrix = [];
+  
+                  (function(){
+                      for(var i = 0, len = tc;i < len;i++){
+                          renderMatrix.push(new Uint8Array(tc).fill(0));
+                      }
+                  })()
+
+                  function next(){
+                        var x, y;
+                        for(x = 0;x < renderMatrix.length;x++){
+                            for(y = 0;y < renderMatrix[x].length;y++){
+                                if(renderMatrix[x][y] == 1) break;
+
+                                if(renderMatrix[x-1] == undefined && renderMatrix[x][y] == 0){
+                                    renderMatrix[x][y] = 1;
+                                    break;
+                                }else if(renderMatrix[x][y] == 0 && renderMatrix[x-1][y] == 3 && (renderMatrix[x][y - 1] == 3 || renderMatrix[x][y - 1] == undefined)){
+                                    renderMatrix[x][y] = 1;
+                                    break;
+                                }
+                            }
+                        }
+                  }
+  
+                  function render(bl, sx, sy, tx, ty, index, done){
+                      renderMatrix[tx][ty] = 2;
+                        if(_.debug){
+                            _.ctx.fillStyle = "rgba(0, 155, 0, 0.4)";
+                            _.ctx.fillRect(tx * sx, ty * sy, bl.w, bl. h);
+                        }
+
+                        decASYNC(
+                            tx * sx,
+                            ty * sy,
+                            bl.w,
+                            bl.h,
+                            _.radius,
+                            data,
+                            index,
+                            tc * tc,
+                            true,
+                            rt.ondata
+                        ).then(function(Vdata){
+                            if(!imagedata){
+                                put(data, Vdata.d, Vdata.m.x, Vdata.m.y);
+                                _.ctx.putImageData(data, 0, 0);
+                            }else{
+                                put(data, Vdata.d, Vdata.m.x, Vdata.m.y);
+                            }
+
+                            renderMatrix[tx][ty] = 3;
+
+                            if(typeof rt.render == "function")
+                                rt.onrender(Vdata);
+
+                            if(renderMatrix[tc-1][tc-1] != 0)
+                                _.running = false;
+                            
+
+                            if(!_.stoped)
+                                done();
+                        })
+                  }
+                  
+                  function rd(){
+                      if(_.stoped){
+                        _.stoped = false;
+                        _.running = false;
+                        return;
+                      }
+
+                      next();
+
+                      for(var x = 0;x < renderMatrix.length;x++){
+                          for(var y = 0;y < renderMatrix[x].length;y++){
+                              if(renderMatrix[x][y] == 1){
+                                  render(bl.chuncks[x][y], bl.stepx, bl.stepy, x, y, x + y, function(){
+                                      requestAnimationFrame(rd);
+                                  })
+                              }
+                          }
+                      }
+                  }
+                  rd();
+                }catch{
+                    _.running = false;
+                }
+              }
+
+            return rt;
+        }else if(window.Worker && !_.usemainthread && threads <= 1){
+            try{
+                _.running = true;
+                decASYNC(0, 0, data.width, data.height, _.radius, data, 1, 1).then(function(data){
+                    _.ctx.putImageData(data.d, x, y);
+                    _.running = false;
                 })
+            }catch{
+                _.running = false;
             }
-
-            return;
-        }else if(window.Worker && !this.usemainthread && this.threads == 1){
-            decASYNC(0, 0, data.width, data.height, this.radius, data, 1, 1).then(function(data){
-                this.ctx.putImageData(data.d, x, y)
-            })
-
             return;
         }
-
+        
         for(var cx = 0;cx < w;cx++)
             for(var cy = 0;cy < h;cy++){
                 pos = 4 * (cx + cy * w);
-                avg = getAverage(data, this.radius, cx, cy);
+                avg = getAverage(data, _.radius, cx, cy);
                 data.data[pos] = avg[0];
                 data.data[pos+1] = avg[1];
                 data.data[pos+2] = avg[2];
                 data.data[pos+3] = avg[3];
             }
 
-        this.ctx.putImageData(data, x, y)
+        _.ctx.putImageData(data, x, y)
+
+        return rt;
     }
 
-    blur.prototype.blur = function(imagedata){
-        var avg = null,
-            pos,
-            data = imagedata || this.ctx.getImageData(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
-
-        if(window.Worker && !this.usemainthread && this.threads != 1){
-            if((this.threads % 2) != 0)
-                this.threads += 1
-
-            var tc = Math.round(this.threads / 2),
-                bl = blocks(data.width, data.height, Math.floor(data.width / tc), Math.floor(data.height / tc)),
-                tn = 0,
-                rt = {
-                    render: function(func){
-                        rt.render = func;
-                    }
-                }
-
-            for(var i = 0;i < bl.length;i++){
-                decASYNC(bl[i].x, bl[i].y, bl[i].w, bl[i].h, this.radius, data, i, bl.length).then(function(data){
-                    this.ctx.putImageData(data.d, data.m.x, data.m.y);
-                    if(typeof rt.render == "function")
-                        rt.render(data)
-                    
-                })
-            }
-
-            return rt;
-        }else if(window.Worker && !this.usemainthread && this.threads == 1){
-            var rt = {
-                render: function(func){
-                    rt.render = func;
-                }
-            }
-
-            decASYNC(0, 0, data.width, data.height, this.radius, data, 1, 1).then(function(data){
-                this.ctx.putImageData(data.d, 0, 0)
-                if(typeof rt.render == "function")
-                    rt.render(data)
-            })
-            return;
-        }
-
-        for(var x = 0;x < data.width;x++)
-            for(var y = 0;y < data.height;y++){
-                pos = 4 * (x + y * data.width);
-                avg = getAverage(data, this.radius, x, y);
-                data.data[pos] = avg[0];
-                data.data[pos+1] = avg[1];
-                data.data[pos+2] = avg[2];
-                data.data[pos+3] = avg[3];
-            }
-        
-        this.ctx.putImageData(data, 0, 0);
+    Blur.prototype.blur = function(imagedata){
+        return this.blurRegion(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
     }
 })()
