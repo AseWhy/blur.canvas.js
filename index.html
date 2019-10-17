@@ -138,6 +138,18 @@
       input[type=range]:focus::-ms-fill-upper {
         background: wheat;
       }
+      select{
+        background: rgb(20 20 20);
+        background: rgb(20 20 20);
+        color: wheat;
+        width: 100%;
+        border: 0px;
+        outline: none;
+      }
+      input[type=file]{
+        background: rgb(20 20 20);
+        color: wheat;
+      }
     </style>
   </head>
   <body>
@@ -149,6 +161,12 @@
         </h1>
         <div>
             <p><input type="file" name="" id="imgs"></p>
+            <p><select name="" id="btype">
+              <option value="0">Размыть строки</option>
+              <option value="1">Размыть столбцы</option>
+              <option value="2">Перкестное Размытие</option>
+              <option value="3">Квадратное Размытие</option>
+            </select></p>
             <p><input type="range" id="threads" min="0" max="100" step="1" value="15"> Потоков использовать <text id="dthreads"></text></p>
             <p><input type="range" id="radius" min="0" max="100" step="1" value="20"> Радиус <text id="dradius"></text></p>
             <p><input type="checkbox" id="mainth"> Использовать главный поток</p>
@@ -157,8 +175,7 @@
         <div id="info"></div>
       </div>
     </div>
-
-    <script src="blur.js"></script> 
+    <script src="blur.min.js"></script> 
     <script src="test.js"></script>
   </body>
 </html>

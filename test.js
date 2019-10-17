@@ -19,41 +19,35 @@ var threads = document.getElementById("threads"),
     imgs = document.getElementById("imgs"),
     linear = document.getElementById("linear"),
     info = document.getElementById("info"),
-    blurrer, needupdate = false,
+    btype = document.getElementById("btype"),
+    blurrer,
     chtimeout = null;
 
 function blurS(threads, radius, mth, line){
     getBimap(image).then(function(img){
-        if(blurrer == undefined || blurrer.running == false){
-            ctx.drawImage(img, 0, 0, 500, 500);
-            if(blurrer) blurrer.stop();
-            blurrer = new Blur(ctx);
-            blurrer.useMainThread(mth);
-            blurrer.setThreads(threads);
-            blurrer.setRadius(radius);
-            blurrer.setDebug(true);
-            blurrer.useLinear(line);
-            if(mth)
-                blurrer.blur().render(function(data){
-                    //console.log(data)
-                })
-            else{
-                var rendered = 0;
-                var start = Date.now()
-                blurrer.blur().render(function(data){
-                    info.innerText = rendered + " of " + data.iterate.of + " rendering - " + data.iterate.number
-                    if(rendered/data.iterate.of == 1){
-                        info.innerText = "Done " + ((Date.now() - start) / 1000) + "(s)";
-                        if(needupdate){
-                            ch();
-                            needupdate = false;
-                        }
-                    }
-                    rendered++;
-                })
-            }
-        }else{
-            needupdate = true;
+        ctx.drawImage(img, 0, 0, 500, 500);
+        if(blurrer) blurrer.stop();
+        blurrer = new Blur(ctx);
+        blurrer.useMainThread(mth);
+        blurrer.setThreads(threads);
+        blurrer.setRadius(radius);
+        blurrer.setDebug(true);
+        blurrer.setPower(parseInt(btype.value))
+        blurrer.useLinear(line);
+        if(mth)
+            blurrer.blur().render(function(data){
+                //console.log(data)
+            })
+        else{
+            var rendered = 0;
+            var start = Date.now()
+            blurrer.blur().render(function(data){
+                info.innerText = rendered + " of " + data.iterate.of + " rendering - " + data.iterate.number
+                if(rendered/data.iterate.of == 1){
+                    info.innerText = "Done " + ((Date.now() - start) / 1000) + "(s)";
+                }
+                rendered++;
+            })
         }
     })
 }
@@ -82,7 +76,7 @@ imgs.oninput = (e) => {
     reader.readAsDataURL(files[0]);
 }
 
-
+btype.oninput = ch
 threads.oninput = ch;
 radius.oninput = ch;
 mainth.oninput = ch;
